@@ -1,0 +1,93 @@
+import cv2
+import numpy as np
+import face_recognition
+import os
+import csv
+from datetime import datetime
+
+# Step 1: Load known faces and their encodings
+def load_known_faces(images_folder):
+    known_face_encodings = []
+    known_face_names = []
+
+    for filename in os.listdir(images_folder):
+        if filename.endswith(".jpg") or filename.endswith(".png"):
+            image_path = os.path.join(images_folder, filename)
+            image = face_recognition.load_image_file(image_path)
+            encoding = face_recognition.face_encodings(image)[0]
+            known_face_encodings.append(encoding)
+            known_face_names.append(os.path.splitext(filename)[0])  # Use filename as name
+
+    return known_face_encodings, known_face_names
+
+# Step 2: Initialize video capture
+video_capture = cv2.VideoCapture(0)
+
+# Step 3: Load known faces
+known_faces_folder = "known_faces"  # Folder containing images of known faces
+known_face_encodings, known_face_names = load_known_faces(known_faces_folder)
+
+# Step 4: Initialize attendance list
+attendance_list = set()
+
+# Step 5: Create a CSV file for attendance
+attendance_file = "attendance.csv"
+if not os.path.exists(attendance_file):
+    with open(attendance_file, mode="w", newline="") as file:
+        writer = csv.writer(file)
+        writer.writerow(["Name", "Time"])
+
+# Step 6: Main loop for face recognition
+while True:
+    # Capture frame-by-frame
+    ret, frame = video_capture.read()
+
+    # Resize frame for faster processing
+    small_frame = cv2.resize(frame, (0, 0), fx=0.25, fy=0.25)
+    rgb_small_frame = cv2.cvtColor(small_frame, cv2.COLOR_BGR2RGB)
+
+    # Detect faces in the frame
+    face_locations = face_recognition.face_locations(rgb_small_frame)
+    face_encodings = face_recognition.face_encodings(rgb_small_frame, face_locations)
+
+    # Recognize faces
+    for (top, right, bottom, left), face_encoding in zip(face_locations, face_encodings):
+        # Scale back up face locations
+        top *= 4
+        right *= 4
+        bottom *= 4
+        left *= 4
+
+        # Compare face with known faces
+        matches = face_recognition.compare_faces(known_face_encodings, face_encoding)
+        name = "Unknown"
+
+        # Use the known face with the smallest distance
+        face_distances = face_recognition.face_distance(known_face_encodings, face_encoding)
+        best_match_index = np.argmin(face_distances)
+        if matches[best_match_index]:
+            name = known_face_names[best_match_index]
+
+            # Mark attendance if not already marked
+            if name not in attendance_list:
+                attendance_list.add(name)
+                current_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                with open(attendance_file, mode="a", newline="") as file:
+                    writer = csv.writer(file)
+                    writer.writerow([name, current_time])
+                print(f"Attendance marked for {name} at {current_time}")
+
+        # Draw rectangle and label on the face
+        cv2.rectangle(frame, (left, top), (right, bottom), (0, 255, 0), 2)
+        cv2.putText(frame, name, (left + 6, bottom - 6), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1)
+
+    # Display the resulting frame
+    cv2.imshow("Face Recognition Attendance System", frame)
+
+    # Exit on 'q' key press
+    if cv2.waitKey(1) & 0xFF == ord('q'):
+        break
+
+# Step 7: Release resources
+video_capture.release()
+cv2.destroyAllWindows()
